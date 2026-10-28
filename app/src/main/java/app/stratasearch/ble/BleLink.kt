@@ -51,7 +51,7 @@ class BleLink(
     }
 
     private val main = Handler(Looper.getMainLooper())
-    private val manager = context.getSystemService(BluetoothManager::class.java)
+    private val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
     val adapter: BluetoothAdapter? get() = manager?.adapter
 
     private var gatt: BluetoothGatt? = null
@@ -148,7 +148,11 @@ class BleLink(
             else LinkState.Reconnecting(targetName, reconnectAttempt)
         )
         gatt = try {
-            device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            if (Build.VERSION.SDK_INT >= 23) {
+                device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            } else {
+                device.connectGatt(context, false, gattCallback)
+            }
         } catch (e: SecurityException) {
             userWantsConnection = false
             onState(LinkState.Failed("Нет разрешения на Bluetooth"))

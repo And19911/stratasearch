@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "app.stratasearch"
-        minSdk = 26
+        minSdk = 21
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
@@ -32,6 +32,10 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    lint {
+        // Сборка падает, если код вызывает функции, которых нет в Android 5.0.
+        fatal += "NewApi"
     }
 }
 

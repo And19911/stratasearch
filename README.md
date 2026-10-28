@@ -29,4 +29,4 @@ Android-приложение для планшета: подключается �
   формулы расстояния. Покрыт тестами на реальных данных из лога (`./gradlew :protocol:test`).
 - `app/` — Android (Kotlin, Jetpack Compose).
 
-Требования: Android 8.0+, Bluetooth LE.
+Требования: Android 5.0+, Bluetooth LE.
