@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -37,3 +40,15 @@ jobs:
         with:
           name: test-report
           path: protocol/build/reports/tests/
+
+      # Готовый APK — на странице Releases, качается одной ссылкой с телефона.
+      - name: Опубликовать релиз
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Поиск под завалом 1.0.${{ github.run_number }}
+          body: |
+            Сборка №${{ github.run_number }}. Скачайте APK ниже и установите на планшет
+            (разрешите установку из неизвестных источников).
+          files: StrataSearch-${{ github.run_number }}.apk
