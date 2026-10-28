@@ -38,7 +38,8 @@ class HeadingSensor(context: Context, private val onHeading: (Double) -> Unit) :
         SensorManager.getRotationMatrixFromVector(r, event.values)
         // Столбцы матрицы — оси устройства в мире (X — восток, Y — север, Z — вверх).
         @Suppress("DEPRECATION")
-        val (sx, sy) = when (wm.defaultDisplay.rotation) {
+        val rotation = wm.defaultDisplay.rotation
+        val (sx, sy) = when (rotation) {
             Surface.ROTATION_90 -> 1.0 to 0.0
             Surface.ROTATION_180 -> 0.0 to -1.0
             Surface.ROTATION_270 -> -1.0 to 0.0
