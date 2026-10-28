@@ -40,9 +40,10 @@ class HeadingSensor(context: Context, private val onHeading: (Double) -> Unit) :
         @Suppress("DEPRECATION")
         val rotation = wm.defaultDisplay.rotation
         val (sx, sy) = when (rotation) {
-            Surface.ROTATION_90 -> 1.0 to 0.0
+            // Как в remapCoordinateSystem из примеров Google: 90° → верх экрана = −X устройства.
+            Surface.ROTATION_90 -> -1.0 to 0.0
             Surface.ROTATION_180 -> 0.0 to -1.0
-            Surface.ROTATION_270 -> -1.0 to 0.0
+            Surface.ROTATION_270 -> 1.0 to 0.0
             else -> 0.0 to 1.0
         }
         // «Верх экрана» в мировых координатах.
