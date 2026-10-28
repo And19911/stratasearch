@@ -25,7 +25,18 @@ jobs:
         run: ./gradlew --no-daemon :protocol:test
 
       - name: Сборка APK
-        run: ./gradlew --no-daemon :app:assembleRelease
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon :app:assembleRelease 2>&1 | tee build.log
+
+      # Ошибки компиляции — в аннотации, чтобы их было видно без скачивания логов.
+      - name: Ошибки сборки
+        if: failure()
+        run: |
+          grep -E "^e: |error:|Error:|What went wrong|lint|Lint" build.log | head -60 > errors.txt || true
+          [ -f app/build/intermediates/lint_vital_intermediate_text_report/release/lintVitalReportRelease/lint-results-release.txt ] && head -60 app/build/intermediates/lint_vital_intermediate_text_report/release/lintVitalReportRelease/lint-results-release.txt >> errors.txt || true
+          body=$(sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g' errors.txt)
+          echo "::error title=Ошибки сборки::${body}"
 
       - name: Переименовать APK
         run: cp app/build/outputs/apk/release/app-release.apk "StrataSearch-${{ github.run_number }}.apk"
