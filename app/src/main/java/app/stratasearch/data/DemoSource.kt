@@ -44,7 +44,8 @@ class DemoSource(
                     -86 + Random.nextInt(-3, 4),
                     -62 + Random.nextInt(-2, 3),
                 )
-                val visible = TAGS.indices.filter { it != 2 || (t.toInt() / 15) % 2 == 0 }
+                // Третья метка — «редкая лампа»: передаёт раз в 20 с, как настоящие лампы в режиме ожидания.
+                val visible = TAGS.indices.filter { it != 2 || t.toInt() % 20 == 0 }
                 emit(neighborReport(seq, RECEIVER, visible.map { TAGS[it] to rssi[it] }))
                 // Второй приёмник слышит одну свою метку и одну общую.
                 emit(neighborReport(seq, RECEIVER_2, listOf(31002 to -68 + Random.nextInt(-3, 4), TAGS[1] to -80 + Random.nextInt(-3, 4))))

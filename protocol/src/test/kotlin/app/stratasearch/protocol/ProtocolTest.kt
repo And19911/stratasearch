@@ -102,10 +102,55 @@ class ProtocolTest {
     fun distanceFormulasMatchOldApp() {
         assertEquals(11.7, Environment.MINE_CLEAR.formulaMeters(-65), 0.1)
         assertEquals(2.05, Environment.MINE_BLOCKAGE.formulaMeters(-65), 0.05)
-        val cal = listOf(CalibrationPoint(-80, 30.0), CalibrationPoint(-60, 10.0))
-        assertEquals(20.0, DistanceModel.estimate(-70.0, Environment.MINE_CLEAR, cal).meters, 1e-9)
-        assertEquals(40.0, DistanceModel.estimate(-90.0, Environment.MINE_CLEAR, cal).meters, 1e-9)
-        assertEquals(5.0, DistanceModel.estimate(-55.0, Environment.MINE_CLEAR, cal).meters, 1e-9)
+        // Без калибровки модель совпадает со старыми формулами.
+        val est = DistanceModel.estimate(-70.0, Environment.MINE_CLEAR)
+        assertEquals(kotlin.math.exp(-(-70 + 37.319) / 11.26), est.meters, 1e-6)
+        assertTrue(est.minMeters < est.meters && est.meters < est.maxMeters)
+    }
+
+    @Test
+    fun calibrationFitRecoversModel() {
+        // Точки строго по модели A = −45, n = 3.
+        val truth = PathLossModel(-45.0, 3.0)
+        val pts = listOf(1.0, 5.0, 10.0, 20.0, 40.0).map { CalibrationPoint(truth.rssiAt(it).toInt(), it) }
+        val m = DistanceModel.fit(Environment.MINE_CLEAR, pts)
+        assertEquals(3.0, m.n, 0.15)
+        assertEquals(-45.0, m.a, 1.5)
+        assertEquals(10.0, m.meters(truth.rssiAt(10.0)), 1.5)
+    }
+
+    @Test
+    fun singlePointShiftsLevelOnly() {
+        val m = DistanceModel.fit(Environment.MINE_CLEAR, listOf(CalibrationPoint(-60, 5.0)))
+        assertEquals(Environment.MINE_CLEAR.defaultN, m.n, 1e-9)
+        assertEquals(5.0, m.meters(-60.0), 1e-6)
+    }
+
+    @Test
+    fun outlierDoesNotBreakScale() {
+        val truth = PathLossModel(-45.0, 3.0)
+        val pts = listOf(1.0, 5.0, 10.0, 20.0).map { CalibrationPoint(truth.rssiAt(it).toInt(), it) } +
+            CalibrationPoint(-50, 30.0) // явно неудачная точка
+        val d = DistanceModel.fit(Environment.MINE_CLEAR, pts).meters(truth.rssiAt(10.0))
+        assertTrue(d in 5.0..20.0, "d=$d")
+    }
+
+    @Test
+    fun zones() {
+        assertEquals(DistanceZone.TOUCH, DistanceZone.of(1.0))
+        assertEquals(DistanceZone.NEAR, DistanceZone.of(12.0))
+        assertEquals(DistanceZone.FAR, DistanceZone.of(80.0))
+    }
+
+    @Test
+    fun bearingFromFourStepsWithRareSignal() {
+        // Лампа передаёт раз в минуту: 4 замера через 90°, цель на востоке.
+        val est = BearingEstimator()
+        listOf(0.0 to -78, 90.0 to -64, 180.0 to -77, 270.0 to -82).forEachIndexed { i, (h, r) ->
+            est.add(i * 60_000L, h, r)
+        }
+        val res = est.estimate(4 * 60_000L)!!
+        assertTrue(kotlin.math.abs(normalizeDeg(res.bearingDeg - 90)) < 30, "bearing=${res.bearingDeg}")
     }
 
     @Test
@@ -142,10 +187,20 @@ class ProtocolTest {
     }
 
     @Test
-    fun rssiFilterTrend() {
-        val f = RssiFilter(5)
-        listOf(-80, -78, -76, -74, -72).forEachIndexed { i, r -> f.add(i * 1000L, r) }
-        assertEquals(-76.0, f.smoothed)
-        assertEquals(2.0, f.slopePerSecond!!, 1e-9)
+    fun rssiFilterRareSignal() {
+        // Раз в минуту: текущее значение — последний замер, а не медиана за 5 минут.
+        val f = RssiFilter()
+        listOf(-80, -78, -70, -64).forEachIndexed { i, r -> f.add(i * 60_000L, r) }
+        assertEquals(-64.0, f.current)
+        assertEquals(6.0, f.trendDb!!, 1e-9)
+        assertEquals(60_000L, f.typicalIntervalMs)
+    }
+
+    @Test
+    fun rssiFilterFrequentSignal() {
+        val f = RssiFilter(windowMs = 15_000)
+        (0 until 30).forEach { i -> f.add(i * 1000L, if (i % 7 == 0) -95 else -70) } // редкие выбросы
+        assertEquals(-70.0, f.current)
+        assertEquals(1000L, f.typicalIntervalMs)
     }
 }

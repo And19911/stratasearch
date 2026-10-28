@@ -30,11 +30,28 @@ data class TagUi(
     val receiver: Int,
     val tag: Int,
     val rssi: Int,
+    /** Текущий сигнал: медиана за последние 15 с, при редком сигнале — последний замер. */
     val smoothedRssi: Double,
-    /** дБм/с; > 0 — сигнал растёт. */
-    val slope: Double?,
+    /** Изменение сигнала к предыдущему замеру, дБ; > 0 — ближе. */
+    val trendDb: Double?,
+    /** Как часто лампа передаёт, мс (null — пока один замер). */
+    val intervalMs: Long?,
     val lastSeen: Long,
     val history: List<Pair<Long, Int>>,
+) {
+    /** Когда считать, что сигнал пропал: 2.5 обычных промежутка, но не меньше 5 с. */
+    val staleAfterMs: Long get() = ((intervalMs ?: 0L) * 5 / 2).coerceIn(MainViewModel.STALE_MS, 10 * 60_000L)
+    fun isStale(now: Long) = now - lastSeen > staleAfterMs
+}
+
+/** Идёт калибровка: ждём [target] новых сигналов метки на известном расстоянии. */
+data class CalibrationSession(
+    val key: String,
+    val env: Environment,
+    val meters: Double,
+    val samples: List<Int> = emptyList(),
+    val startedAt: Long = System.currentTimeMillis(),
+    val target: Int = 3,
 )
 
 data class GatewayUi(val lastSeq: Int, val lastSeen: Long, val packets: Long)
@@ -64,6 +81,8 @@ data class UiState(
     /** Пеленг на выбранную метку (если уже набрано достаточно измерений при повороте). */
     val bearing: BearingResult? = null,
     val bearingCoverage: Double = 0.0,
+    val bearingSamples: Int = 0,
+    val calibrationSession: CalibrationSession? = null,
     /** Счётчик пингов — по нему экран запускает волну импульса. */
     val pingTick: Long = 0,
 ) {
@@ -91,7 +110,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private class Track(val receiver: Int, val tag: Int) {
-        val filter = RssiFilter(5)
+        val filter = RssiFilter()
         val bearing = BearingEstimator()
         val history = ArrayDeque<Pair<Long, Int>>()
         var rssi = 0
@@ -132,7 +151,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val st = _state.value
         val t = st.selected
-        if (t == null || st.now - t.lastSeen > STALE_MS) null
+        if (t == null || t.isStale(st.now)) null
         else Beeper.Ping(Beeper.intervalForRssi(t.smoothedRssi), Beeper.closeness(t.smoothedRssi), audible = st.sound)
     }
 
@@ -185,7 +204,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun select(key: String?) {
-        _state.update { it.copy(selectedKey = key, bearing = null, bearingCoverage = 0.0) }
+        _state.update { it.copy(selectedKey = key, bearing = null, bearingCoverage = 0.0, bearingSamples = 0, calibrationSession = null) }
         if (key != null) {
             beeper.start()
             heading.start()
@@ -206,7 +225,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Начать пеленг заново (например, после перехода на новое место). */
     fun resetBearing() {
         _state.value.selectedKey?.let { tracks[it]?.bearing?.clear() }
-        _state.update { it.copy(bearing = null, bearingCoverage = 0.0) }
+        _state.update { it.copy(bearing = null, bearingCoverage = 0.0, bearingSamples = 0) }
     }
 
     fun setEnvironment(env: Environment) {
@@ -220,8 +239,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun addCalibrationPoint(env: Environment, rssi: Int, meters: Double) {
-        updateCalibration(env) { pts -> (pts.filterNot { it.rssi == rssi } + CalibrationPoint(rssi, meters)).sortedBy { it.rssi } }
+        updateCalibration(env) { pts -> (pts + CalibrationPoint(rssi, meters)).sortedBy { it.meters } }
         log("Калибровка ${env.title}: $rssi дБм = $meters м")
+    }
+
+    /** Мастер калибровки: стоим на [meters] от лампы, ждём новые сигналы. */
+    fun startCalibration(meters: Double) {
+        val key = _state.value.selectedKey ?: return
+        _state.update { it.copy(calibrationSession = CalibrationSession(key, it.environment, meters)) }
+        log("Калибровка: старт, $meters м, метка $key")
+    }
+
+    /** Сохранить точку по уже принятым сигналам (если ждать все не хочется). */
+    fun finishCalibration() {
+        val s = _state.value.calibrationSession ?: return
+        if (s.samples.isNotEmpty()) {
+            addCalibrationPoint(s.env, s.samples.average().let { kotlin.math.round(it).toInt() }, s.meters)
+        }
+        _state.update { it.copy(calibrationSession = null) }
+    }
+
+    fun cancelCalibration() {
+        _state.update { it.copy(calibrationSession = null) }
+        log("Калибровка отменена")
     }
 
     fun removeCalibrationPoint(env: Environment, point: CalibrationPoint) =
@@ -271,6 +311,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     tr.history.addLast(now to n.rssi)
                     val h = _state.value.heading
                     if (h != null && key == _state.value.selectedKey) tr.bearing.add(now, h, n.rssi)
+                    val cal = _state.value.calibrationSession
+                    if (cal != null && cal.key == key) {
+                        val next = cal.copy(samples = cal.samples + n.rssi)
+                        _state.update { it.copy(calibrationSession = next) }
+                        if (next.samples.size >= next.target) finishCalibration()
+                    }
                     while (tr.history.isNotEmpty() && now - tr.history.first().first > HISTORY_MS) tr.history.removeFirst()
                 }
                 publishTracks()
@@ -293,8 +339,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 receiver = t.receiver,
                 tag = t.tag,
                 rssi = t.rssi,
-                smoothedRssi = t.filter.smoothed ?: t.rssi.toDouble(),
-                slope = t.filter.slopePerSecond,
+                smoothedRssi = t.filter.current ?: t.rssi.toDouble(),
+                trendDb = t.filter.trendDb,
+                intervalMs = t.filter.typicalIntervalMs,
                 lastSeen = t.lastSeen,
                 history = t.history.toList(),
             )
@@ -306,7 +353,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val key = _state.value.selectedKey ?: return
         val est = tracks[key]?.bearing ?: return
         val now = System.currentTimeMillis()
-        _state.update { it.copy(bearing = est.estimate(now), bearingCoverage = est.coverage(now)) }
+        _state.update { it.copy(bearing = est.estimate(now), bearingCoverage = est.coverage(now), bearingSamples = est.sampleCount) }
     }
 
     private fun log(line: String) {

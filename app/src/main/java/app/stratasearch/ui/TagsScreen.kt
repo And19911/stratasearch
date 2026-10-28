@@ -52,6 +52,7 @@ import app.stratasearch.data.MainViewModel
 import app.stratasearch.data.TagUi
 import app.stratasearch.data.UiState
 import app.stratasearch.protocol.DistanceModel
+import kotlin.math.roundToInt
 
 @Composable
 fun TagsScreen(st: UiState, vm: MainViewModel, onGoConnect: () -> Unit) {
@@ -199,24 +200,28 @@ private fun TagCard(t: TagUi, st: UiState, onClick: () -> Unit) {
     Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Dot(freshnessColor(age), 14)
+                Dot(if (!t.isStale(st.now)) Palette.Good else if (age < 2 * t.staleAfterMs) Palette.Warn else Palette.Idle, 14)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Метка ${t.tag}", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "приёмник ${t.receiver} · ${formatAge(age)}",
+                        "приёмник ${t.receiver} · ${formatAge(age)}" +
+                            (t.intervalMs?.takeIf { it >= 3_000 }?.let { " · раз в ~${(it + 500) / 1000} с" } ?: ""),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        "${formatMeters(est.meters)} м",
-                        fontSize = 30.sp,
+                        est.zone.title,
+                        fontSize = 26.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
-                        color = if (age < 30_000) Palette.Accent else Palette.Idle,
+                        color = if (!t.isStale(st.now)) Palette.Accent else Palette.Idle,
                     )
-                    Text("${t.rssi} дБм", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "≈${formatMeters(est.meters)} м · ${t.smoothedRssi.roundToInt()} дБм",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             Spacer(Modifier.height(12.dp))

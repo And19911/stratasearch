@@ -113,7 +113,7 @@ fun TargetScreen(t: TagUi, st: UiState, vm: MainViewModel) {
     }
 
     val age = st.now - t.lastSeen
-    val stale = age > MainViewModel.STALE_MS
+    val stale = t.isStale(st.now)
     val est = DistanceModel.estimate(t.smoothedRssi, st.environment, st.calibrationFor(st.environment))
     val relative = if (st.bearing != null && st.heading != null) normalizeDeg(st.bearing.bearingDeg - st.heading) else null
 
@@ -174,19 +174,17 @@ fun TargetScreen(t: TagUi, st: UiState, vm: MainViewModel) {
                 )
             }
 
-            // ---- Цифровое табло расстояния ----
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    if (est.meters < 10) String.format(java.util.Locale.US, "%.1f", est.meters) else formatMeters(est.meters),
-                    style = glow(if (stale) Palette.Idle else Palette.Accent, 88, FontWeight.Black),
-                )
-                Text(" M", style = glow(if (stale) Palette.Idle else Palette.Accent, 36), modifier = Modifier.padding(bottom = 12.dp))
-            }
+            // ---- Табло: зона крупно, метры — ориентировочно ----
+            val main = if (stale) Palette.Idle else Palette.Accent
+            Text(est.zone.title, style = glow(main, 64, FontWeight.Black), textAlign = TextAlign.Center)
+            Text("≈ ${formatMeters(est.meters)} M", style = glow(main, 34))
             Text(
-                "ДИАПАЗОН ${formatMeters(est.minMeters)}–${formatMeters(est.maxMeters)} M · " +
-                    if (est.fromCalibration) "КАЛИБРОВКА" else "ФОРМУЛА",
+                "скорее всего от ${formatMeters(est.minMeters)} до ${formatMeters(est.maxMeters)} м · " +
+                    if (est.fromCalibration) "по калибровке" else "по заводской формуле",
                 style = glow(Palette.TextDim, 14, FontWeight.Normal),
+                textAlign = TextAlign.Center,
             )
+            NextSignal(t, st.now)
 
             if (stale) {
                 Text(
@@ -197,7 +195,7 @@ fun TargetScreen(t: TagUi, st: UiState, vm: MainViewModel) {
             }
 
             DirectionPanel(st, relative, onReset = vm::resetBearing)
-            TrendPanel(t.slope, stale)
+            TrendPanel(t.trendDb, stale)
 
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
@@ -218,18 +216,28 @@ fun TargetScreen(t: TagUi, st: UiState, vm: MainViewModel) {
             OutlinedButton(onClick = { calibrating = true }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 Icon(Icons.Default.Straighten, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Калибровка: я знаю точное расстояние")
+                Text("Калибровка: я на известном расстоянии")
+            }
+            if (st.calibrationFor(st.environment).isNotEmpty()) {
+                Text(
+                    "Точек калибровки в режиме «${st.environment.title}»: ${st.calibrationFor(st.environment).size}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Spacer(Modifier.height(16.dp))
         }
     }
 
-    if (calibrating) {
+    val session = st.calibrationSession
+    if (session != null) {
+        CalibrationProgressDialog(session, t, st.now, onSaveNow = vm::finishCalibration, onCancel = vm::cancelCalibration)
+    } else if (calibrating) {
         CalibrationDialog(
-            rssi = t.smoothedRssi.roundToInt(),
+            rssi = null,
             envTitle = st.environment.title,
-            onSave = { m -> vm.addCalibrationPoint(st.environment, t.smoothedRssi.roundToInt(), m); calibrating = false },
+            onSave = { m -> vm.startCalibration(m); calibrating = false },
             onDismiss = { calibrating = false },
+            confirmText = "Начать",
         )
     }
 }
@@ -371,12 +379,26 @@ private fun DirectionPanel(st: UiState, relative: Double?, onReset: () -> Unit) 
                         Text("НАПРАВЛЕНИЕ НЕИЗВЕСТНО", style = glow(Palette.Warn, 18))
                     }
                     Spacer(Modifier.height(6.dp))
+                    val interval = st.selected?.intervalMs
+                    val rare = interval != null && interval >= 10_000
                     Text(
-                        "Держите планшет вместе с антенной и медленно повернитесь на месте на полный круг " +
-                            "(около 30 секунд). Приложение запомнит, где сигнал сильнее.",
+                        if (rare)
+                            "Сигнал редкий, поэтому по шагам. Держите планшет вместе с антенной. " +
+                                "Направьте её, дождитесь сигнала, повернитесь на 90° и снова дождитесь. " +
+                                "Нужно 4 стороны (≈${formatInterval(interval!! * 4)})."
+                        else
+                            "Держите планшет вместе с антенной и медленно повернитесь на месте на полный круг " +
+                                "(около 30 секунд). Приложение запомнит, где сигнал сильнее.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                     )
+                    if (rare) {
+                        Text(
+                            "Замеров с разных сторон: ${(st.bearingCoverage * 8).roundToInt()} из 4",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
                     Spacer(Modifier.height(10.dp))
                     // Прогресс: нужно «прослушать» хотя бы половину круга.
                     val progress = (st.bearingCoverage / 0.5).coerceIn(0.0, 1.0)
@@ -400,23 +422,31 @@ private fun DirectionPanel(st: UiState, relative: Double?, onReset: () -> Unit) 
 }
 
 @Composable
-private fun TrendPanel(slope: Double?, stale: Boolean) {
+private fun TrendPanel(trendDb: Double?, stale: Boolean) {
+    // Порог 3 дБ: меньшие изменения — обычный разброс сигнала, а не движение.
     val (text, color) = when {
-        stale || slope == null -> "· · ·" to Palette.Idle
-        slope > 0.3 -> "▲ БЛИЖЕ" to Palette.Good
-        slope < -0.3 -> "▼ ДАЛЬШЕ" to Palette.Bad
+        stale -> "· · ·" to Palette.Idle
+        trendDb == null -> "ЖДЁМ 2-Й СИГНАЛ" to Palette.Idle
+        trendDb >= 3 -> "▲ БЛИЖЕ  +${trendDb.roundToInt()} дБ" to Palette.Good
+        trendDb <= -3 -> "▼ ДАЛЬШЕ  ${trendDb.roundToInt()} дБ" to Palette.Bad
         else -> "= БЕЗ ИЗМЕНЕНИЙ" to Palette.TextDim
     }
     Box(
         Modifier.fillMaxWidth().border(2.dp, color.copy(alpha = 0.6f), RoundedCornerShape(12.dp)).padding(12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, style = glow(color, 30, FontWeight.Black))
+        Text(text, style = glow(color, 26, FontWeight.Black))
     }
 }
 
 @Composable
-fun CalibrationDialog(rssi: Int?, envTitle: String, onSave: (Double) -> Unit, onDismiss: () -> Unit) {
+fun CalibrationDialog(
+    rssi: Int?,
+    envTitle: String,
+    onSave: (Double) -> Unit,
+    onDismiss: () -> Unit,
+    confirmText: String = "Сохранить",
+) {
     var text by remember { mutableStateOf("") }
     val meters = text.replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 }
     AlertDialog(
@@ -425,8 +455,13 @@ fun CalibrationDialog(rssi: Int?, envTitle: String, onSave: (Double) -> Unit, on
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Режим: $envTitle")
-                if (rssi != null) Text("Текущий сигнал: $rssi дБм")
-                Text("Измерьте рулеткой расстояние от антенны до метки и введите его:")
+                if (rssi != null) Text("Сигнал: $rssi дБм")
+                Text(
+                    if (rssi == null)
+                        "Встаньте на известном расстоянии от лампы (измерьте рулеткой), направьте антенну " +
+                            "точно на лампу и не двигайтесь. Приложение дождётся 3 новых сигналов и усреднит их."
+                    else "Измерьте рулеткой расстояние от антенны до метки и введите его:"
+                )
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -437,8 +472,80 @@ fun CalibrationDialog(rssi: Int?, envTitle: String, onSave: (Double) -> Unit, on
             }
         },
         confirmButton = {
-            TextButton(onClick = { meters?.let(onSave) }, enabled = meters != null) { Text("Сохранить") }
+            TextButton(onClick = { meters?.let(onSave) }, enabled = meters != null) { Text(confirmText) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+/** Когда ждать следующий сигнал лампы — при редком сигнале это главное, что нужно знать. */
+@Composable
+private fun NextSignal(t: TagUi, now: Long) {
+    val age = now - t.lastSeen
+    val interval = t.intervalMs
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp)) {
+            Row {
+                Text("Сигнал ${formatAge(age)}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                if (interval != null && interval >= 3_000) {
+                    Text("лампа: раз в ~${formatInterval(interval)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (interval != null && interval >= 3_000) {
+                val left = interval - age
+                Spacer(Modifier.height(8.dp))
+                val f = (age.toFloat() / interval).coerceIn(0f, 1f)
+                Box(Modifier.fillMaxWidth().height(8.dp).background(Palette.SurfaceHigh, RoundedCornerShape(50))) {
+                    Box(Modifier.fillMaxWidth(f).height(8.dp).background(Palette.AccentDim, RoundedCornerShape(50)))
+                }
+                Text(
+                    if (left > 0) "следующий через ~${formatInterval(left)} — не двигайтесь, если ждёте замер"
+                    else "сигнал задерживается…",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun formatInterval(ms: Long): String = if (ms < 90_000) "${(ms + 500) / 1000} с" else "${(ms + 30_000) / 60_000} мин"
+
+@Composable
+private fun CalibrationProgressDialog(
+    session: app.stratasearch.data.CalibrationSession,
+    t: TagUi,
+    now: Long,
+    onSaveNow: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Калибровка: ${formatMeters(session.meters)} м") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Не двигайтесь, антенна направлена на лампу.")
+                Text(
+                    "Принято сигналов: ${session.samples.size} из ${session.target}",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (session.samples.isNotEmpty()) {
+                    Text("Замеры: ${session.samples.joinToString(", ")} дБм", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                val waited = now - session.startedAt
+                val interval = t.intervalMs
+                Text(
+                    "Ждём ${formatInterval(waited)}" +
+                        (if (interval != null && interval >= 3_000) ", лампа передаёт раз в ~${formatInterval(interval)}" else ""),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSaveNow, enabled = session.samples.isNotEmpty()) {
+                Text("Сохранить по ${session.samples.size}")
+            }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Отмена") } },
     )
 }

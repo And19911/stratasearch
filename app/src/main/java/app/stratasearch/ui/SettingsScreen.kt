@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import app.stratasearch.data.MainViewModel
 import app.stratasearch.data.UiState
 import app.stratasearch.protocol.DistanceModel
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(st: UiState, vm: MainViewModel) {
@@ -66,13 +67,20 @@ fun SettingsScreen(st: UiState, vm: MainViewModel) {
         item { SectionTitle("Калибровка расстояния") }
         item { EnvironmentSelector(env, vm::setEnvironment) }
         item {
+            val m = DistanceModel.fit(env, points)
             Text(
-                if (points.size >= 2)
-                    "Для режима «${env.title}» расстояние считается по вашим точкам (между ними — плавно)."
-                else
-                    "Точек меньше двух — используется заводская формула. Добавьте хотя бы 2–3 точки на разных " +
-                        "расстояниях: встаньте с антенной на известном расстоянии от метки и нажмите " +
-                        "«Калибровка» на экране метки.",
+                when {
+                    points.isEmpty() ->
+                        "Сейчас — заводская формула. Чтобы расстояние было точнее для ваших ламп, сделайте 3–5 точек " +
+                            "на разных расстояниях (например 2, 5, 10, 20, 40 м): откройте метку, встаньте на " +
+                            "расстоянии, направьте антенну на лампу и нажмите «Калибровка»."
+                    points.map { it.meters }.distinct().size < 2 ->
+                        "Одна дистанция: уровень сигнала подстроен, наклон кривой — заводской. " +
+                            "Добавьте точки на других расстояниях."
+                    else ->
+                        "Кривая подобрана по вашим точкам. Неудачные точки (отклонение больше 6 дБ) " +
+                            "помечены красным — их лучше удалить и переснять."
+                } + "\nМодель: ${m.a.roundToInt()} дБм на 1 м, затухание n = ${"%.1f".format(m.n)}, разброс ±${m.sigmaDb.roundToInt()} дБ.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -80,11 +88,20 @@ fun SettingsScreen(st: UiState, vm: MainViewModel) {
         if (points.isNotEmpty()) item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(vertical = 4.dp)) {
+                    val model = DistanceModel.fit(env, points)
                     points.forEachIndexed { i, p ->
                         if (i > 0) HorizontalDivider()
+                        // Насколько точка отличается от подобранной кривой.
+                        val dev = p.rssi - model.rssiAt(p.meters)
+                        val bad = kotlin.math.abs(dev) > 6 && points.size >= 3
                         Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("${p.rssi} дБм", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                             Text("${formatMeters(p.meters)} м", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                            Text("${p.rssi} дБм", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                (if (dev >= 0) "+" else "") + "${dev.roundToInt()} дБ",
+                                Modifier.weight(0.8f),
+                                color = if (bad) Palette.Bad else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                             IconButton(onClick = { vm.removeCalibrationPoint(env, p) }) {
                                 Icon(Icons.Default.Delete, "Удалить", tint = Palette.Bad)
                             }

@@ -46,8 +46,10 @@ fun normalizeDeg(d: Double): Double {
  * всего, — направление на метку.
  */
 class BearingEstimator(
-    private val sectors: Int = 12,
-    private val maxAgeMs: Long = 90_000,
+    /** 8 секторов по 45°: при редком сигнале хватает 4 замеров через 90°. */
+    private val sectors: Int = 8,
+    /** Лампа может передавать раз в минуту — храним замеры 10 минут. */
+    private val maxAgeMs: Long = 600_000,
     private val minCoverage: Double = 0.5,
     private val minContrastDb: Double = 3.0,
 ) {
@@ -61,6 +63,8 @@ class BearingEstimator(
     }
 
     fun clear() = samples.clear()
+
+    val sampleCount: Int get() = samples.size
 
     /** Доля секторов, где есть хотя бы одно свежее измерение. */
     fun coverage(nowMs: Long): Double = sectorMeans(nowMs).count { it != null }.toDouble() / sectors
