@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import app.stratasearch.ble.BleLink
 import app.stratasearch.ble.FoundDevice
 import app.stratasearch.ble.LinkState
+import app.stratasearch.protocol.BearingEstimator
+import app.stratasearch.protocol.BearingResult
 import app.stratasearch.protocol.CalibrationPoint
 import app.stratasearch.protocol.Environment
 import app.stratasearch.protocol.FrameAssembler
@@ -54,9 +56,22 @@ data class UiState(
     val calibration: Map<Environment, List<CalibrationPoint>> = emptyMap(),
     val logLines: List<String> = emptyList(),
     val now: Long = System.currentTimeMillis(),
+    /** Показывать метки только этого приёмника; null — всех. */
+    val receiverFilter: Int? = null,
+    /** Азимут антенны по компасу, null — компас выключен или его нет. */
+    val heading: Double? = null,
+    val compassAvailable: Boolean = true,
+    /** Пеленг на выбранную метку (если уже набрано достаточно измерений при повороте). */
+    val bearing: BearingResult? = null,
+    val bearingCoverage: Double = 0.0,
+    /** Счётчик пингов — по нему экран запускает волну импульса. */
+    val pingTick: Long = 0,
 ) {
     val receiving: Boolean get() = demo || link is LinkState.Connected
     val selected: TagUi? get() = tags.firstOrNull { it.key == selectedKey }
+    /** Все приёмники, от которых приходили отчёты. */
+    val receivers: List<Int> get() = tags.map { it.receiver }.distinct().sorted()
+    val visibleTags: List<TagUi> get() = receiverFilter?.let { f -> tags.filter { it.receiver == f } } ?: tags
     fun calibrationFor(env: Environment) = calibration[env].orEmpty()
 }
 
@@ -70,12 +85,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             sound = settings.soundEnabled,
             calibration = settings.loadCalibration(),
             lastDevice = settings.lastDeviceAddress?.let { it to settings.lastDeviceName },
+            receiverFilter = settings.receiverFilter,
         )
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private class Track(val receiver: Int, val tag: Int) {
         val filter = RssiFilter(5)
+        val bearing = BearingEstimator()
         val history = ArrayDeque<Pair<Long, Int>>()
         var rssi = 0
         var lastSeen = 0L
@@ -105,13 +122,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         onLog = ::log,
     )
 
-    private val demo = DemoSource(viewModelScope, ::onBytes)
+    private val demo = DemoSource(viewModelScope, ::onBytes) { _state.value.heading }
 
-    private val beeper = Beeper(viewModelScope) {
+    private val heading = HeadingSensor(app) { h -> _state.update { it.copy(heading = h) } }
+
+    private val beeper = Beeper(
+        scope = viewModelScope,
+        onPing = { _state.update { it.copy(pingTick = it.pingTick + 1) } },
+    ) {
         val st = _state.value
         val t = st.selected
-        if (!st.sound || t == null || st.now - t.lastSeen > STALE_MS) null
-        else Beeper.intervalForRssi(t.smoothedRssi)
+        if (t == null || st.now - t.lastSeen > STALE_MS) null
+        else Beeper.Ping(Beeper.intervalForRssi(t.smoothedRssi), Beeper.closeness(t.smoothedRssi), audible = st.sound)
     }
 
     init {
@@ -119,6 +141,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (isActive) {
                 _state.update { it.copy(now = System.currentTimeMillis(), bluetoothOn = ble.isBluetoothOn) }
+                updateBearing()
                 delay(1000)
             }
         }
@@ -162,8 +185,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun select(key: String?) {
-        _state.update { it.copy(selectedKey = key) }
-        if (key != null) beeper.start() else beeper.stop()
+        _state.update { it.copy(selectedKey = key, bearing = null, bearingCoverage = 0.0) }
+        if (key != null) {
+            beeper.start()
+            heading.start()
+            _state.update { it.copy(compassAvailable = heading.available) }
+        } else {
+            beeper.stop()
+            heading.stop()
+            _state.update { it.copy(heading = null) }
+        }
+    }
+
+    fun setReceiverFilter(receiver: Int?) {
+        settings.receiverFilter = receiver
+        _state.update { it.copy(receiverFilter = receiver) }
+        log(if (receiver == null) "Фильтр приёмника снят" else "Фильтр: только приёмник $receiver")
+    }
+
+    /** Начать пеленг заново (например, после перехода на новое место). */
+    fun resetBearing() {
+        _state.value.selectedKey?.let { tracks[it]?.bearing?.clear() }
+        _state.update { it.copy(bearing = null, bearingCoverage = 0.0) }
     }
 
     fun setEnvironment(env: Environment) {
@@ -226,9 +269,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     tr.lastSeen = now
                     tr.filter.add(now, n.rssi)
                     tr.history.addLast(now to n.rssi)
+                    val h = _state.value.heading
+                    if (h != null && key == _state.value.selectedKey) tr.bearing.add(now, h, n.rssi)
                     while (tr.history.isNotEmpty() && now - tr.history.first().first > HISTORY_MS) tr.history.removeFirst()
                 }
                 publishTracks()
+                updateBearing()
             }
             is Packet.GatewayStatus -> {
                 gatewayPackets++
@@ -256,6 +302,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(tags = list, reportPackets = reportPackets) }
     }
 
+    private fun updateBearing() {
+        val key = _state.value.selectedKey ?: return
+        val est = tracks[key]?.bearing ?: return
+        val now = System.currentTimeMillis()
+        _state.update { it.copy(bearing = est.estimate(now), bearingCoverage = est.coverage(now)) }
+    }
+
     private fun log(line: String) {
         sessionLog.add(line)
         _state.update { it.copy(logLines = sessionLog.lines) }
@@ -271,6 +324,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         beeper.stop()
+        heading.stop()
         demo.stop()
         ble.release()
     }

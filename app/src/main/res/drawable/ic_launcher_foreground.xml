@@ -2,15 +2,15 @@
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
     <!-- Волны сигнала над точкой -->
-    <path android:fillColor="#00000000" android:strokeColor="#FFB300" android:strokeWidth="5"
+    <path android:fillColor="#00000000" android:strokeColor="#3DFF9C" android:strokeWidth="5"
         android:strokeLineCap="round"
         android:pathData="M36,50 A18,18 0 0,1 72,50" />
-    <path android:fillColor="#00000000" android:strokeColor="#FFB300" android:strokeWidth="5"
+    <path android:fillColor="#00000000" android:strokeColor="#3DFF9C" android:strokeWidth="5"
         android:strokeLineCap="round"
         android:pathData="M26,48 A28,28 0 0,1 82,48" />
-    <path android:fillColor="#FFB300"
+    <path android:fillColor="#3DFF9C"
         android:pathData="M54,54 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
     <!-- Завал -->
-    <path android:fillColor="#5D6470"
+    <path android:fillColor="#1B7A4A"
         android:pathData="M28,80 L40,68 L50,74 L60,64 L72,72 L80,80 Z" />
 </vector>

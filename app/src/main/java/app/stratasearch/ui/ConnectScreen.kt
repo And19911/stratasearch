@@ -46,7 +46,7 @@ fun ConnectScreen(st: UiState, vm: MainViewModel, onEnableBluetooth: () -> Unit)
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.BluetoothDisabled, null, tint = Palette.Amber)
+                        Icon(Icons.Default.BluetoothDisabled, null, tint = Palette.Accent)
                         Spacer(Modifier.width(12.dp))
                         Text("Bluetooth выключен", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                         Button(onClick = onEnableBluetooth) { Text("Включить") }
@@ -107,7 +107,7 @@ fun ConnectScreen(st: UiState, vm: MainViewModel, onEnableBluetooth: () -> Unit)
         items(st.found, key = { it.address }) { d ->
             Card(Modifier.fillMaxWidth().clickable { vm.connect(d) }) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Bluetooth, null, tint = Palette.Amber)
+                    Icon(Icons.Default.Bluetooth, null, tint = Palette.Accent)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(d.name, style = MaterialTheme.typography.titleMedium)

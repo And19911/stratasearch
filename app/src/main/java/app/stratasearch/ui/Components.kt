@@ -49,7 +49,7 @@ fun formatAge(ms: Long): String = when {
 
 fun freshnessColor(ageMs: Long): Color = when {
     ageMs < 5_000 -> Palette.Good
-    ageMs < 30_000 -> Palette.Amber
+    ageMs < 30_000 -> Palette.Warn
     else -> Palette.Idle
 }
 
@@ -65,10 +65,10 @@ fun Dot(color: Color, size: Int = 12) {
 @Composable
 fun StatusStrip(st: UiState, modifier: Modifier = Modifier) {
     val (color, text) = when {
-        st.demo -> Palette.Amber to "ДЕМО-РЕЖИМ — данные не настоящие"
+        st.demo -> Palette.Warn to "ДЕМО-РЕЖИМ — данные не настоящие"
         else -> when (val l = st.link) {
             LinkState.Idle -> Palette.Idle to "Приёмник не подключён"
-            is LinkState.Connecting -> Palette.Amber to "Подключение к ${l.name}…"
+            is LinkState.Connecting -> Palette.Warn to "Подключение к ${l.name}…"
             is LinkState.Connected -> Palette.Good to "Подключено: ${l.name}"
             is LinkState.Reconnecting -> Palette.Bad to "Связь потеряна, переподключение (${l.attempt})…"
             is LinkState.Failed -> Palette.Bad to l.message
@@ -85,7 +85,8 @@ fun StatusStrip(st: UiState, modifier: Modifier = Modifier) {
             if (st.receiving && gw != null) {
                 val age = st.now - gw.lastSeen
                 Text(
-                    "Шлюз: пакет №${gw.lastSeq}, ${formatAge(age)} · меток: ${st.tags.size}",
+                    "Шлюз: пакет №${gw.lastSeq}, ${formatAge(age)} · меток: ${st.visibleTags.size}" +
+                        (st.receiverFilter?.let { " · фильтр: приёмник $it" } ?: ""),
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (age > 10_000) Palette.Bad else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 22.dp, top = 2.dp),
@@ -121,7 +122,7 @@ fun SignalBar(rssi: Double, modifier: Modifier = Modifier, height: Int = 14) {
     val f = signalFraction(rssi)
     val color = when {
         f > 0.66f -> Palette.Good
-        f > 0.33f -> Palette.Amber
+        f > 0.33f -> Palette.Warn
         else -> Palette.Bad
     }
     Box(
@@ -149,9 +150,9 @@ fun RssiChart(history: List<Pair<Long, Int>>, now: Long, modifier: Modifier = Mo
             pts.forEachIndexed { i, (t, r) ->
                 if (i == 0) path.moveTo(x(t), y(r.toFloat())) else path.lineTo(x(t), y(r.toFloat()))
             }
-            drawPath(path, Palette.Amber, style = Stroke(width = 5f, cap = StrokeCap.Round))
+            drawPath(path, Palette.Accent, style = Stroke(width = 5f, cap = StrokeCap.Round))
         }
-        pts.lastOrNull()?.let { (t, r) -> drawCircle(Palette.Amber, 9f, Offset(x(t), y(r.toFloat()))) }
+        pts.lastOrNull()?.let { (t, r) -> drawCircle(Palette.Accent, 9f, Offset(x(t), y(r.toFloat()))) }
     }
 }
 

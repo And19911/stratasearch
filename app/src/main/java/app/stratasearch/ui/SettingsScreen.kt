@@ -113,7 +113,7 @@ fun SettingsScreen(st: UiState, vm: MainViewModel) {
             Row(Modifier.padding(horizontal = 8.dp)) {
                 Text("$r дБм", Modifier.weight(1f))
                 Text("формула ${formatMeters(f.meters)} м", Modifier.weight(1.4f))
-                if (c.fromCalibration) Text("калибр. ${formatMeters(c.meters)} м", Modifier.weight(1.4f), color = Palette.Amber)
+                if (c.fromCalibration) Text("калибр. ${formatMeters(c.meters)} м", Modifier.weight(1.4f), color = Palette.Accent)
             }
         }
     }

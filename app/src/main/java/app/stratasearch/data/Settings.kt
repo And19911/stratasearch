@@ -25,6 +25,10 @@ class Settings(context: Context) {
         get() = prefs.getString("last_name", null) ?: "Приёмник"
         set(v) = prefs.edit().putString("last_name", v).apply()
 
+    var receiverFilter: Int?
+        get() = prefs.getInt("receiver_filter", -1).takeIf { it >= 0 }
+        set(v) = prefs.edit().putInt("receiver_filter", v ?: -1).apply()
+
     fun loadCalibration(): Map<Environment, List<CalibrationPoint>> {
         val json = prefs.getString("calibration", null) ?: return emptyMap()
         return runCatching {

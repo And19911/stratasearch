@@ -109,6 +109,39 @@ class ProtocolTest {
     }
 
     @Test
+    fun bearingFromSweep() {
+        val target = 60.0
+        val est = BearingEstimator()
+        // Полный оборот за 36 с, сигнал сильнее всего в сторону цели.
+        for (t in 0 until 36) {
+            val heading = t * 10.0
+            val rssi = (-75 + 10 * kotlin.math.cos(Math.toRadians(heading - target))).toInt()
+            est.add(t * 1000L, heading, rssi)
+        }
+        val r = est.estimate(36_000)!!
+        assertTrue(kotlin.math.abs(normalizeDeg(r.bearingDeg - target)) < 15, "bearing=${r.bearingDeg}")
+        assertTrue(r.coverage > 0.99)
+    }
+
+    @Test
+    fun noBearingWithoutSweepOrContrast() {
+        val est = BearingEstimator()
+        for (t in 0 until 10) est.add(t * 1000L, 5.0, -70)   // стоим на месте
+        assertEquals(null, est.estimate(10_000))
+        val flat = BearingEstimator()
+        for (t in 0 until 36) flat.add(t * 1000L, t * 10.0, -70) // сигнал одинаковый со всех сторон
+        assertEquals(null, flat.estimate(36_000))
+    }
+
+    @Test
+    fun relativeDirection() {
+        assertEquals(RelativeDirection.AHEAD, RelativeDirection.of(normalizeDeg(350.0 - 10.0)))
+        assertEquals(RelativeDirection.RIGHT, RelativeDirection.of(normalizeDeg(100.0 - 10.0)))
+        assertEquals(RelativeDirection.LEFT, RelativeDirection.of(normalizeDeg(280.0 - 10.0)))
+        assertEquals(RelativeDirection.BEHIND, RelativeDirection.of(normalizeDeg(190.0 - 10.0)))
+    }
+
+    @Test
     fun rssiFilterTrend() {
         val f = RssiFilter(5)
         listOf(-80, -78, -76, -74, -72).forEachIndexed { i, r -> f.add(i * 1000L, r) }

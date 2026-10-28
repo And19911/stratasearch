@@ -9,25 +9,27 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-/** Тёмная контрастная тема: хорошо читается в шахте и не слепит. */
+/** Палитра в стиле детектора движения из «Чужих»: зелёный люминофор на чёрном. */
 object Palette {
-    val Bg = Color(0xFF0E1116)
-    val Surface = Color(0xFF171B22)
-    val SurfaceHigh = Color(0xFF212733)
-    val Outline = Color(0xFF39404D)
-    val Text = Color(0xFFECEFF4)
-    val TextDim = Color(0xFF9AA3B2)
-    val Amber = Color(0xFFFFB300)
-    val Good = Color(0xFF43D17A)
-    val Bad = Color(0xFFFF5A5A)
-    val Idle = Color(0xFF5D6470)
+    val Bg = Color(0xFF040906)
+    val Surface = Color(0xFF0B1610)
+    val SurfaceHigh = Color(0xFF122419)
+    val Outline = Color(0xFF1E3A2A)
+    val Text = Color(0xFFD9FBE6)
+    val TextDim = Color(0xFF7FA893)
+    val Accent = Color(0xFF3DFF9C)
+    val AccentDim = Color(0xFF1B7A4A)
+    val Warn = Color(0xFFFFB300)
+    val Good = Color(0xFF3DFF9C)
+    val Bad = Color(0xFFFF4D4D)
+    val Idle = Color(0xFF4A5A52)
 }
 
 private val scheme = darkColorScheme(
-    primary = Palette.Amber,
+    primary = Palette.Accent,
     onPrimary = Color.Black,
-    primaryContainer = Color(0xFF3D2E00),
-    onPrimaryContainer = Palette.Amber,
+    primaryContainer = Color(0xFF0F3A24),
+    onPrimaryContainer = Palette.Accent,
     secondary = Palette.Good,
     onSecondary = Color.Black,
     background = Palette.Bg,
